@@ -11,7 +11,7 @@ import torch.nn.functional as F
 
 config = {
     "model": {
-        "input_dim": 3,  # Входная размерность
+        "input_dim": 5,  # Входная размерность
         "num_layers": 2,  # Количество слоев
         "dropout": 0.2,  # Вероятность нулевого значения
         "hidden_dim": 200  # Количество скрытых узлов
@@ -43,6 +43,7 @@ def preprocess_data(df):
     data['product_count'] = data['product_count'].ffill()
 
     data['month'] = data['date'].dt.month
+    data['year'] = data['date'].dt.year
 
     data['month_sin'] = np.sin(2 * np.pi * data['month'] / 12)
     data['month_cos'] = np.cos(2 * np.pi * data['month'] / 12)
@@ -58,6 +59,8 @@ def create_date_features(data, sequence_length):
     for i in range(len(data) - sequence_length):
         seq_data = data.iloc[i:i + sequence_length][[
             'scaled_product_count',
+            'month',
+            'year',
             'month_sin',
             'month_cos']].values
 
@@ -171,8 +174,10 @@ def make_forecast(model, last_sequence, scaler, forecast_weeks, last_date):
     for date in forecast_dates:
         month_sin = np.sin(2 * np.pi * date.month / 12)
         month_cos = np.cos(2 * np.pi * date.month / 12)
+        month = date.month 
+        year = date.year
 
-        seasonal_features = torch.tensor([month_sin, month_cos], dtype=torch.float32)
+        seasonal_features = torch.tensor([month, year, month_sin, month_cos], dtype=torch.float32)
         seasonal_features = seasonal_features.unsqueeze(0).unsqueeze(0)
         seasonal_features = seasonal_features.repeat(1, current_sequence.shape[1], 1)
 
