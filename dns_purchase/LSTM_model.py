@@ -1,3 +1,4 @@
+from asyncio.windows_events import INFINITE
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -8,6 +9,7 @@ from torch.utils.data import DataLoader, Dataset
 from torch.utils.tensorboard import SummaryWriter
 import time
 import torch.nn.functional as F
+import logging
 
 import mlflow
 
@@ -111,6 +113,7 @@ class HybridLSTM(nn.Module):
 def train_model(model, train_loader, criterion, optimizer, epochs, writer=None, early_stopping_patience=config['training']['early_stopping_patience']):
     best_loss = float('inf')
     no_improvement_counter = 0
+    maxacc = float(np.inf)
 
     for epoch in range(epochs):
         model.train()
@@ -132,11 +135,16 @@ def train_model(model, train_loader, criterion, optimizer, epochs, writer=None, 
             writer.add_histogram(f'{name}.grad', weight.grad.detach().numpy(), epoch)
 
         average_loss = epoch_loss / len(train_loader)
+        mlflow.log_metric('avg_loss', average_loss, step=epoch)
 
         if writer:
             writer.add_scalar("Epoch Loss", average_loss, epoch)
 
         log_message(f"Эпоха {epoch+1}/{epochs}, Средний Loss: {average_loss:.4f}", "INFO")
+        if average_loss < maxacc:
+            print('Saving model because its better')
+            maxacc = average_loss
+            mlflow.pytorch.log_model(model, "model")
 
         if average_loss < best_loss:
             best_loss = average_loss
@@ -213,78 +221,99 @@ def run_pipeline(df,
                  forecast_weeks=config['forecast']['forecast_weeks'],
                  batch_size=config['training']['batch_size'],
                  iterations=config['forecast']['iterations'],
-                 category=1):
+                 category=1, name=1):
 
     writer = SummaryWriter()
 
-    input_dim = config['model']['input_dim']
+    mlflow.set_tracking_uri("http://localhost:5000")
+    mlflow.set_experiment("PyTorch_test")
 
-    h = 0
-    delta = 0
-    while h != 99:
-        delta += 1
-        data, scaler = preprocess_data(df)
-        sequences, targets = create_date_features(data, sequence_length)
-        train_loader = create_dataloader(sequences, targets, batch_size)
+    mlflow_logger = logging.getLogger("mlflow")
+    mlflow_logger.setLevel(logging.ERROR)
 
-        model = HybridLSTM(input_dim=input_dim, hidden_dim=hidden_dim, num_layers=num_layers, dropout=dropout)
+    current_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
 
-        for inputs, targets in train_loader:
-            writer.add_graph(model, inputs)
-            break
+    with mlflow.start_run(run_name=f'lstm_purchase_{name}_{current_time}'):
 
-        criterion = nn.MSELoss()
-        optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+        mlflow.log_param('seq_len', sequence_length)
+        mlflow.log_param('hidden_dim', hidden_dim)
+        mlflow.log_param('num_layers', num_layers)
+        mlflow.log_param('dropout', dropout)
+        mlflow.log_param('learning_rate', learning_rate)
+        mlflow.log_param('epochs', epochs)
+        mlflow.log_param('batch_size', batch_size)
 
-        loss = train_model(model, train_loader, criterion, optimizer, epochs, writer)
-        predictions, actuals = evaluate_model(model, train_loader, scaler)
 
-        forecast_df = make_forecast(model, sequences[-1], scaler, forecast_weeks, last_date=data['date'].iloc[config['forecast']['weeks_behind']])
+        input_dim = config['model']['input_dim']
 
-        if len(forecast_df['Predicted'].unique()) <= 5 or loss > config['training']['loss_target']:
-            print("Модель в состоянии недообучения")
-            if delta >= 30:
-                print(f'Невозможно построить прогноз для категории {category}')
-                forecast_df = 0
+        h = 0
+        delta = 0
+        while h != 99:
+            delta += 1
+            data, scaler = preprocess_data(df)
+            sequences, targets = create_date_features(data, sequence_length)
+            train_loader = create_dataloader(sequences, targets, batch_size)
+
+            model = HybridLSTM(input_dim=input_dim, hidden_dim=hidden_dim, num_layers=num_layers, dropout=dropout)
+
+            for inputs, targets in train_loader:
+                writer.add_graph(model, inputs)
                 break
+
+            criterion = nn.MSELoss()
+            optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+
+            loss = train_model(model, train_loader, criterion, optimizer, epochs, writer)
+   
+            predictions, actuals = evaluate_model(model, train_loader, scaler)
+
+            forecast_df = make_forecast(model, sequences[-1], scaler, forecast_weeks, last_date=data['date'].iloc[config['forecast']['weeks_behind']])
+
+            if len(forecast_df['Predicted'].unique()) <= 5 or loss > config['training']['loss_target']:
+                print("Модель в состоянии недообучения")
+                if delta >= 30:
+                    print(f'Невозможно построить прогноз для категории {category}')
+                    forecast_df = 0
+                    break
+                else:
+                    continue
             else:
-                continue
+                h = 99
+                print('Модель обучена')
+                print('Средний LOSS =', loss)
+
+            fig, axs = plt.subplots(3, figsize=(12, 12))
+            fig.suptitle('Итерация 0')
+
+            axs[0].plot(actuals, label="Actual Data", color="blue")
+            axs[0].plot(predictions, label="Predicted Data", color="orange", linestyle="dashed")
+            axs[0].legend()
+            axs[0].set_title('Обучение')
+
+
+            axs[1].plot(data['date'][-20:], data['product_count'][-20:], label='Actual Data', color='blue')
+            axs[1].plot(forecast_df['Date'], forecast_df['Predicted'], label='Forecast', color='orange',
+                    linestyle='dashed')
+            axs[1].legend()
+            axs[1].set_title('Прогноз')
+
+            axs[2].plot(data['date'], data['product_count'], label='Actual Data', color='blue')
+            axs[2].plot(forecast_df['Date'], forecast_df['Predicted'], label='Forecast', color='orange',
+                    linestyle='dashed')
+            axs[2].set_title('Валидация')
+
+            fig.show()
+
+        if iterations > 0:
+            forecast_df_sum = pd.DataFrame(columns=['Date', 'Predicted'])
+
+            for i in range(iterations):
+                forecast_df_1 = make_forecast(model, sequences[-1], scaler, forecast_weeks, last_date=data['date'].iloc[config['forecast']['weeks_behind']])
+                forecast_df_sum = pd.merge(forecast_df_sum, forecast_df_1, on='Date')
         else:
-            h = 99
-            print('Модель обучена')
-            print('Средний LOSS =', loss)
+            forecast_df = make_forecast(model, sequences[-1], scaler, forecast_weeks, last_date=data['date'].iloc[config['forecast']['weeks_behind']])
 
-        fig, axs = plt.subplots(3, figsize=(12, 12))
-        fig.suptitle('Итерация 0')
-
-        axs[0].plot(actuals, label="Actual Data", color="blue")
-        axs[0].plot(predictions, label="Predicted Data", color="orange", linestyle="dashed")
-        axs[0].legend()
-        axs[0].set_title('Обучение')
-
-
-        axs[1].plot(data['date'][-20:], data['product_count'][-20:], label='Actual Data', color='blue')
-        axs[1].plot(forecast_df['Date'], forecast_df['Predicted'], label='Forecast', color='orange',
-                 linestyle='dashed')
-        axs[1].legend()
-        axs[1].set_title('Прогноз')
-
-        axs[2].plot(data['date'], data['product_count'], label='Actual Data', color='blue')
-        axs[2].plot(forecast_df['Date'], forecast_df['Predicted'], label='Forecast', color='orange',
-                 linestyle='dashed')
-        axs[2].set_title('Валидация')
-
-        fig.show()
-
-    if iterations > 0:
-        forecast_df_sum = pd.DataFrame(columns=['Date', 'Predicted'])
-
-        for i in range(iterations):
-            forecast_df_1 = make_forecast(model, sequences[-1], scaler, forecast_weeks, last_date=data['date'].iloc[config['forecast']['weeks_behind']])
-            forecast_df_sum = pd.merge(forecast_df_sum, forecast_df_1, on='Date')
-    else:
-        forecast_df = make_forecast(model, sequences[-1], scaler, forecast_weeks, last_date=data['date'].iloc[config['forecast']['weeks_behind']])
-
-    print(f'прогноз построен для категории {category}')
+        print(f'прогноз построен для категории {category}')
+    mlflow.end_run()
     return model, forecast_df
 

@@ -21,13 +21,13 @@ for i in data.category_id.unique():
     data_cost =  get_full_data(get_sales(df))
 
     if len(data_count.date) > 20:
-        model, forecast_df = run_pipeline(data_count, category=i)
+        model, forecast_df = run_pipeline(data_count, category=i, name='count')
         print(f"    ✅Прогноз количества построен для категории {i}")
     else:
         print(f'    ❌Недостаточно данных количества для категории {i}')
 
     if len(data_cost.date) > 20:
-        model_2, forecast_df_cost = run_pipeline(data_cost, category=i)
+        model_2, forecast_df_cost = run_pipeline(data_cost, category=i, name='cost')
         print(f"    ✅Прогноз затрат построен для категории {i}")
     else:
         print(f'    ❌Недостаточно данных затрат для категории {i}')
@@ -43,6 +43,8 @@ for i in data.category_id.unique():
 
     predict_df = pd.concat([predict_df, count_df])
     print(f"✅Прогноз построен для категории {i}")
+
+    break
 
 
 predict_df.to_csv('lstm_predict.csv', index=False)
