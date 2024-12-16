@@ -1,0 +1,19 @@
+artifact_path: cost_model
+flavors:
+  prophet:
+    code: null
+    data: model.pr
+    model_type: Prophet
+    prophet_version: 1.1.6
+  python_function:
+    data: model.pr
+    env:
+      conda: conda.yaml
+      virtualenv: python_env.yaml
+    loader_module: mlflow.prophet
+    python_version: 3.12.3
+mlflow_version: 2.19.0
+model_size_bytes: 20915
+model_uuid: 3f5910faa84743d69cd9f6c0a15b2712
+run_id: e3a83eea267446d2a57c177377c277e6
+utc_time_created: '2024-12-16 07:23:09.438008'
