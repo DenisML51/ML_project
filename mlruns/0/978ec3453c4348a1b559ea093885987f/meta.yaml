@@ -1,0 +1,15 @@
+artifact_uri: file:///C:/Users/Rusinov.DS/PycharmProjects/ML_project/mlruns/0/978ec3453c4348a1b559ea093885987f/artifacts
+end_time: null
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 978ec3453c4348a1b559ea093885987f
+run_name: lstm_purchase_fd7bbd78-7654-11eb-a224-00155d42eb06_count
+run_uuid: 978ec3453c4348a1b559ea093885987f
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1734059027020
+status: 1
+tags: []
+user_id: Denis Rusinov

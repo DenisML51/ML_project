@@ -9,6 +9,9 @@ from torch.utils.tensorboard import SummaryWriter
 import time
 import torch.nn.functional as F
 
+import mlflow
+
+
 config = {
     "model": {
         "input_dim": 5,  # Входная размерность
@@ -224,7 +227,7 @@ def run_pipeline(df,
         sequences, targets = create_date_features(data, sequence_length)
         train_loader = create_dataloader(sequences, targets, batch_size)
 
-        model = HybridLSTM(input_dim=input_dim, hidden_dim=hidden_dim, num_layers=num_layers, dropout=dropout, seq_length=sequence_length)
+        model = HybridLSTM(input_dim=input_dim, hidden_dim=hidden_dim, num_layers=num_layers, dropout=dropout)
 
         for inputs, targets in train_loader:
             writer.add_graph(model, inputs)
